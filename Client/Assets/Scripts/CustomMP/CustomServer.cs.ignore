@@ -1,0 +1,208 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+using System.Collections;
+using System.Net.Sockets;
+using System.Net;
+using System;
+using System.Text;
+
+public class CustomServer : MonoBehaviour
+{
+    private HttpListener Listener;
+
+    public CustomNetworkManager NetworkManager;
+
+    public int Port = 8480;
+
+    public List<string> Players = new List<string>();
+    public List<CustomNetworkObjectData> PlayerData = new List<CustomNetworkObjectData>();
+    
+    private UdpClient udpServer;
+
+    float timeSinceLastCall = 0f;
+    float callFrequency = 0f;
+
+    // Start is called before the first frame update
+    void Start()
+    {
+        udpServer = new UdpClient(Port);
+        udpServer.BeginReceive(new AsyncCallback(ReceiveCallback), null);
+        Debug.Log("Server started on 127.0.0.1:" + Port.ToString());
+
+        //Listener = new HttpListener();
+        //Listener.Prefixes.Add("http://*:" + Port.ToString() + "/");
+        //Listener.Start();
+        //Receive();
+//
+        //Debug.Log("Server started on http://127.0.0.1:" + Port.ToString() + "/");
+
+        callFrequency = 1f / NetworkManager.serverTargetFps;
+    }
+
+    private void ReceiveCallback(IAsyncResult ar) 
+    {
+        IPEndPoint receivedIpEndPoint = new IPEndPoint(IPAddress.Any, 8480);
+        byte[] receivedBytes = udpServer.EndReceive(ar, ref receivedIpEndPoint);
+        string receivedText = Encoding.ASCII.GetString(receivedBytes);
+        Debug.Log("Received: " + receivedText);
+        // if Spawn:{uid}
+        if (receivedText.StartsWith("Spawn:"))
+        {
+            var uid = receivedText.Split(':')[1];
+            if (!Players.Contains(uid))
+            {
+                Players.Add(uid);
+                PlayerData.Add(new CustomNetworkObjectData(uid, Vector3.zero, Vector3.zero));
+
+                // Send back all players
+                var message = "Spawned:" + uid;
+                SendMessage(message);
+            }
+        }
+
+        udpServer.BeginReceive(new AsyncCallback(ReceiveCallback), null);
+    }
+
+    private void SendMessage(string message) {
+        byte[] sendBytes = Encoding.ASCII.GetBytes(message);
+        udpServer.Send(sendBytes, sendBytes.Length, "127.0.0.1", 8480);
+    }
+
+    public void Stop()
+    {
+        Listener.Stop();
+    }
+
+    // Update is called once per frame
+    void Update()
+    {
+        timeSinceLastCall += Time.deltaTime;
+        if (timeSinceLastCall >= callFrequency)
+        {
+            timeSinceLastCall = 0f;
+        }
+    }
+
+    private void Receive()
+    {
+        Listener.BeginGetContext(new AsyncCallback(ListenerCallback), Listener);
+    }
+
+    private void ListenerCallback(IAsyncResult result)
+    {
+        if (Listener.IsListening)
+        {
+            var context = Listener.EndGetContext(result);
+            var request = context.Request;
+
+            /// Get methods
+
+            if (request.Url.AbsolutePath == "/api/status/")
+            {
+                var response = context.Response;
+                var responseString = "OK";
+                var buffer = Encoding.UTF8.GetBytes(responseString);
+                response.ContentLength64 = buffer.Length;
+                var output = response.OutputStream;
+                output.Write(buffer, 0, buffer.Length);
+                output.Close();
+            }
+            else if (request.Url.AbsolutePath.StartsWith("/api/players/"))
+            {
+                // Split the path into an array
+                var path = request.Url.AbsolutePath.Split('/');
+                // Get the uid
+                var uid = path[3];
+
+                // Print out JSON object array of players and their positions and rotations except for the player making the request
+                var response = context.Response;
+                var responseString = "[";
+                for (int i = 0; i < PlayerData.Count; i++)
+                {
+                    if (PlayerData[i].Uid == uid) continue;
+
+                    responseString += "{\"uid\":\"" + PlayerData[i].Uid + "\",\"position\":" + PlayerData[i].Position.ToString() + ",\"rotation\":" + PlayerData[i].Rotation.ToString() + "}";
+                    if (i < PlayerData.Count - 1) responseString += ",";
+                }
+                responseString += "]";
+                var buffer = Encoding.UTF8.GetBytes(responseString);
+                response.ContentLength64 = buffer.Length;
+                var output = response.OutputStream;
+                output.Write(buffer, 0, buffer.Length);
+                output.Close();
+            }
+
+            /// Set methods
+
+            else if (request.Url.AbsolutePath.StartsWith("/api/player/spawn/"))
+            {
+                var response = context.Response;
+                var responseString = "OK";
+                var buffer = Encoding.UTF8.GetBytes(responseString);
+                response.ContentLength64 = buffer.Length;
+                var output = response.OutputStream;
+                output.Write(buffer, 0, buffer.Length);
+                output.Close();
+
+                // Split the path into an array
+                var path = request.Url.AbsolutePath.Split('/');
+
+                // Get the uid
+                var uid = path[4];
+
+                Players.Add(uid);
+            }
+
+            // Check if the path is /api/player/sync/{uid}/{x}/{y}/{z}/{rx}/{ry}/{rz}
+            else if (request.Url.AbsolutePath.StartsWith("/api/player/sync/"))
+            {
+                var response = context.Response;
+                var responseString = "OK";
+                var buffer = Encoding.UTF8.GetBytes(responseString);
+                response.ContentLength64 = buffer.Length;
+                var output = response.OutputStream;
+                output.Write(buffer, 0, buffer.Length);
+                output.Close();
+
+                // Split the path into an array
+                var path = request.Url.AbsolutePath.Split('/');
+
+                // Check if the path is the correct length
+                // Get the uid
+                var uid = path[4];
+
+                // Get the position
+                var x = float.Parse(path[5]);
+                var y = float.Parse(path[6]);
+                var z = float.Parse(path[7]);
+
+                // Get the rotation
+                var rx = float.Parse(path[8]);
+                var ry = float.Parse(path[9]);
+                var rz = float.Parse(path[10]);
+
+                Debug.Log($"Syncing {uid} to {x}, {y}, {z} and {rx}, {ry}, {rz}");
+
+                // Put the data into the list of player data if it doesn't exist, otherwise update it
+                var playerData = PlayerData.Find(x => x.Uid == uid);
+                if (playerData == null)
+                {
+                    PlayerData.Add(new CustomNetworkObjectData(uid, new Vector3(x, y, z), new Vector3(rx, ry, rz)));
+                }
+                else
+                {
+                    playerData.Position = new Vector3(x, y, z);
+                    playerData.Rotation = new Vector3(rx, ry, rz);
+                }  
+            }
+
+            else {
+                Debug.Log($"{request.Url}");
+            }
+
+            Receive();
+        }
+    }
+}
