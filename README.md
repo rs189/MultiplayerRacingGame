@@ -15,8 +15,6 @@ This is a proof of concept racing game made in Unity along with an external mult
 
 ## Screenshots
 
-## Screenshots
-
 ![Screenshot](https://github.com/rs189/Game-MultiplayerRacingGame/blob/main/Thumbnail.png?raw=true)
 
 
